@@ -409,7 +409,7 @@
     <span class="page-meta" id="page-meta"></span>
   </div>
   <div class="search-wrap">
-    <input class="search-input" id="search-input" type="text" placeholder="Search products and brands… (Enter)" />
+    <input class="search-input" id="search-input" type="text" placeholder="looking for something specific?" />
     <button class="search-clear" id="search-clear">×</button>
   </div>
   <div class="status-bar" id="status-bar">Loading...</div>
@@ -479,7 +479,48 @@ let activePopoverProductId = null;
 function savePersist() {
   localStorage.setItem('saved', JSON.stringify([...savedIds]));
   localStorage.setItem('hidden', JSON.stringify([...hiddenIds]));
+  localStorage.setItem('groups', JSON.stringify(groups));
   document.getElementById('saved-count').textContent = savedIds.size > 0 ? savedIds.size : '';
+  renderGroupsNav();
+}
+
+function renderGroupsNav() {
+  const section = document.getElementById('groups-nav-section');
+  const list = document.getElementById('groups-nav-list');
+  const groupNames = Object.keys(groups);
+  section.style.display = groupNames.length > 0 ? 'block' : 'none';
+  list.innerHTML = groupNames.map(name => `
+    <div class="nav-group-item">
+      <a href="#" data-view="group:${name}">${name} <span class="nav-count">${(groups[name]||[]).length}</span></a>
+      <button class="nav-group-delete" data-group="${name}" title="Delete group">×</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('a').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      document.querySelectorAll('nav a').forEach(x => x.classList.remove('active'));
+      a.classList.add('active');
+      currentView = a.dataset.view;
+      searchQuery = '';
+      document.getElementById('search-input').value = '';
+      document.getElementById('search-clear').classList.remove('visible');
+      document.getElementById('grid').className = 'grid';
+      render();
+      document.getElementById('main').scrollTo(0, 0);
+    });
+  });
+  list.querySelectorAll('.nav-group-delete').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const name = btn.dataset.group;
+      if (confirm(`Delete group "${name}"?`)) {
+        delete groups[name];
+        if (currentView === `group:${name}`) currentView = 'saved';
+        savePersist();
+        render();
+      }
+    });
+  });
 }
 
 function hiRes(src) {
@@ -511,13 +552,14 @@ async function fetchBrand(brand) {
       // Accessories: include all sizes, just needs to be in stock
       if (category === 'accessories') {
         const variant = p.variants?.find(v => v.available) || p.variants?.[0];
+        const searchText = [p.title, brand.name, p.product_type, (p.tags||[]).join(' '), (p.body_html||'').replace(/<[^>]+>/g,''), p.variants?.map(v=>v.title).join(' ')].join(' ').toLowerCase();
         products.push({
           id: `${brand.id}-${p.id}`,
           brand: brand.name, brandId: brand.id,
           name: p.title, price: formatPrice(variant?.price),
           image: hiRes(p.images?.[0]?.src),
           link: `${brand.url}/products/${p.handle}`,
-          category, sizeFiltered: false,
+          category, sizeFiltered: false, searchText,
         });
         continue;
       }
@@ -530,13 +572,14 @@ async function fetchBrand(brand) {
         });
         if (!shoeMatch) continue;
         const variant = p.variants?.find(v => v.available && (v.title || '').replace(/[^0-9.]/g, '') === USER_SHOE_SIZE) || p.variants?.[0];
+        const searchText = [p.title, brand.name, p.product_type, (p.tags||[]).join(' '), (p.body_html||'').replace(/<[^>]+>/g,''), p.variants?.map(v=>v.title).join(' ')].join(' ').toLowerCase();
         products.push({
           id: `${brand.id}-${p.id}`,
           brand: brand.name, brandId: brand.id,
           name: p.title, price: formatPrice(variant?.price),
           image: hiRes(p.images?.[0]?.src),
           link: `${brand.url}/products/${p.handle}`,
-          category, sizeFiltered: true,
+          category, sizeFiltered: true, searchText,
         });
         continue;
       }
@@ -551,13 +594,14 @@ async function fetchBrand(brand) {
         const t = (v.title || '').toUpperCase();
         return (t === USER_SIZE || t.includes(`/ ${USER_SIZE}`) || t.startsWith(`${USER_SIZE} /`) || t.startsWith(`${USER_SIZE}/`)) && v.available;
       }) || p.variants?.[0];
+      const searchText = [p.title, brand.name, p.product_type, (p.tags||[]).join(' '), (p.body_html||'').replace(/<[^>]+>/g,''), p.variants?.map(v=>v.title).join(' ')].join(' ').toLowerCase();
       products.push({
         id: `${brand.id}-${p.id}`,
         brand: brand.name, brandId: brand.id,
         name: p.title, price: formatPrice(variant?.price),
         image: hiRes(p.images?.[0]?.src),
         link: `${brand.url}/products/${p.handle}`,
-        category, sizeFiltered: true,
+        category, sizeFiltered: true, searchText,
       });
     }
     return products;
@@ -581,13 +625,19 @@ function getFilteredProducts(view) {
   let products;
   if (view === 'saved') products = allProducts.filter(p => savedIds.has(p.id));
   else if (view === 'all') products = allProducts.filter(p => !hiddenIds.has(p.id));
+  else if (view.startsWith('group:')) {
+    const name = view.slice(6);
+    const ids = new Set(groups[name] || []);
+    products = allProducts.filter(p => ids.has(p.id));
+  }
   else products = allProducts.filter(p => !hiddenIds.has(p.id) && p.category === view);
 
   if (searchQuery) {
-    const q = searchQuery.toLowerCase();
-    products = products.filter(p =>
-      p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q)
-    );
+    const words = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    products = products.filter(p => {
+      const text = p.searchText || (p.name + ' ' + p.brand).toLowerCase();
+      return words.every(w => text.includes(w));
+    });
   }
   return products;
 }
@@ -603,7 +653,9 @@ function render() {
   }
 
   const products = getFilteredProducts(currentView);
-  const label = currentView === 'all' ? 'All' : currentView.charAt(0).toUpperCase() + currentView.slice(1);
+  const label = currentView === 'all' ? 'All'
+    : currentView.startsWith('group:') ? currentView.slice(6)
+    : currentView.charAt(0).toUpperCase() + currentView.slice(1);
   title.textContent = label;
   meta.textContent = products.length + ' items';
 
@@ -612,6 +664,7 @@ function render() {
     return;
   }
 
+  const isSavedView = currentView === 'saved' || currentView.startsWith('group:');
   grid.innerHTML = products.map(p => {
     const isSaved = savedIds.has(p.id);
     return `
@@ -622,6 +675,7 @@ function render() {
           : `<div class="card-img-placeholder">${p.brand}</div>`}
         <div class="card-actions">
           <button class="card-btn save-btn ${isSaved ? 'saved' : ''}" data-id="${p.id}" title="Save">♥</button>
+          ${isSavedView ? `<button class="card-btn group-btn" data-id="${p.id}" title="Add to group">⊕</button>` : ''}
           <button class="card-btn hide-btn" data-id="${p.id}" title="Hide">×</button>
         </div>
       </div>
@@ -654,7 +708,73 @@ function render() {
       render();
     });
   });
+
+  grid.querySelectorAll('.group-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      activePopoverProductId = btn.dataset.id;
+      showGroupPopover(btn);
+    });
+  });
 }
+
+function showGroupPopover(anchor) {
+  const popover = document.getElementById('group-popover');
+  const list = document.getElementById('group-options-list');
+  const groupNames = Object.keys(groups);
+  list.innerHTML = groupNames.length === 0
+    ? `<div style="font-size:11px;color:var(--muted);padding:4px 8px;">No groups yet</div>`
+    : groupNames.map(name => {
+        const inGroup = (groups[name] || []).includes(activePopoverProductId);
+        return `<button class="group-option ${inGroup ? 'active-group' : ''}" data-group="${name}">${inGroup ? '✓ ' : ''}${name}</button>`;
+      }).join('');
+  list.querySelectorAll('.group-option').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const name = btn.dataset.group;
+      if (!groups[name]) groups[name] = [];
+      const idx = groups[name].indexOf(activePopoverProductId);
+      if (idx === -1) { groups[name].push(activePopoverProductId); showToast(`Added to ${name}`); }
+      else { groups[name].splice(idx, 1); showToast(`Removed from ${name}`); }
+      savePersist();
+      closeGroupPopover();
+    });
+  });
+  const rect = anchor.getBoundingClientRect();
+  popover.style.top = (rect.bottom + 6) + 'px';
+  popover.style.left = Math.max(8, rect.left - 160) + 'px';
+  popover.classList.remove('hidden');
+}
+
+function closeGroupPopover() {
+  document.getElementById('group-popover').classList.add('hidden');
+  activePopoverProductId = null;
+}
+
+document.getElementById('group-new-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  const input = document.getElementById('group-new-input');
+  const name = input.value.trim();
+  if (!name) return;
+  if (!groups[name]) groups[name] = [];
+  if (activePopoverProductId) groups[name].push(activePopoverProductId);
+  input.value = '';
+  savePersist();
+  showToast(`Added to ${name}`);
+  closeGroupPopover();
+});
+
+document.getElementById('group-new-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('group-new-btn').click();
+  e.stopPropagation();
+});
+
+document.addEventListener('click', e => {
+  const popover = document.getElementById('group-popover');
+  if (!popover.classList.contains('hidden') && !popover.contains(e.target)) {
+    closeGroupPopover();
+  }
+});
 
 function renderBrands() {
   const main = document.getElementById('main');
