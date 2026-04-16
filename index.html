@@ -339,8 +339,9 @@
   .group-new input { flex:1;font-family:'DM Mono',monospace;font-size:11px;padding:5px 8px;border:1px solid var(--border);background:var(--bg);color:var(--text);outline:none; }
   .group-new input:focus { border-color:var(--text); }
   .group-new button { font-family:'DM Mono',monospace;font-size:11px;padding:5px 8px;border:1px solid var(--border);background:var(--text);color:var(--bg);cursor:pointer; }
-  .nav-group-item { position:relative; }
-  .nav-group-delete { float:right;font-size:10px;color:var(--muted);background:none;border:none;cursor:pointer;padding:0;margin-top:1px;opacity:0;transition:opacity 0.15s; }
+  .nav-group-item { display:flex;align-items:center; }
+  .nav-group-item a { flex:1; }
+  .nav-group-delete { font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;padding:0 20px 0 4px;opacity:0;transition:opacity 0.15s;line-height:1;flex-shrink:0; }
   .nav-group-item:hover .nav-group-delete { opacity:1; }
 
   /* TOAST */
